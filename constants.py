@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import sys
+import random
 import logging
 from pathlib import Path
 from copy import deepcopy
 from enum import Enum, auto
 from datetime import timedelta
-from typing import Any, Dict, Literal, NamedTuple, NewType, TYPE_CHECKING
+from typing import Any, Dict, Literal, NewType, TYPE_CHECKING
 
 from yarl import URL
 
@@ -22,6 +23,14 @@ IS_PACKAGED = hasattr(sys, "_MEIPASS")
 # logging special levels
 CALL = logging.INFO - 1
 logging.addLevelName(CALL, "CALL")
+# site-packages venv path changes depending on the system platform
+if sys.platform == "win32":
+    SYS_SITE_PACKAGES = "Lib/site-packages"
+else:
+    # On Linux, the site-packages path includes a versioned 'pythonX.Y' folder part
+    # The Lib folder is also spelled in lowercase: 'lib'
+    version_info = sys.version_info
+    SYS_SITE_PACKAGES = f"lib/python{version_info.major}.{version_info.minor}/site-packages"
 
 
 def _resource_path(relative_path: Path | str) -> Path:
@@ -46,12 +55,16 @@ SELF_PATH = Path(sys.argv[0]).absolute()
 if SELF_PATH.stem == "pyinstaller":
     SELF_PATH = Path(__file__).with_name("main.py").absolute()
 WORKING_DIR = SELF_PATH.absolute().parent
+# Development paths
+VENV_PATH = Path(WORKING_DIR, "env")
+SITE_PACKAGES_PATH = Path(VENV_PATH, SYS_SITE_PACKAGES)
 # Translations path
 # NOTE: These don't have to be available to the end-user, so the path points to the internal dir
 LANG_PATH = _resource_path("lang")
 # Other Paths
 LOG_PATH = Path(WORKING_DIR, "log.txt")
 CACHE_PATH = Path(WORKING_DIR, "cache")
+LOCK_PATH = Path(WORKING_DIR, "lock.file")
 CACHE_DB = Path(CACHE_PATH, "mapping.json")
 COOKIES_PATH = Path(WORKING_DIR, "cookies.jar")
 SETTINGS_PATH = Path(WORKING_DIR, "settings.json")
@@ -68,7 +81,7 @@ MAX_TOPICS = (MAX_WEBSOCKETS * WS_TOPICS_LIMIT) - BASE_TOPICS
 MAX_CHANNELS = MAX_TOPICS // TOPICS_PER_CHANNEL
 # Misc
 DEFAULT_LANG = "English"
-BASE_URL = URL("https://twitch.tv")
+BASE_URL = URL("https://www.twitch.tv")
 # Intervals and Delays
 PING_INTERVAL = timedelta(minutes=3)
 PING_TIMEOUT = timedelta(seconds=10)
@@ -86,20 +99,65 @@ FILE_FORMATTER = logging.Formatter(
 OUTPUT_FORMATTER = logging.Formatter("{levelname}: {message}", style='{', datefmt="%H:%M:%S")
 
 
-class ClientInfo(NamedTuple):
-    CLIENT_ID: str
-    USER_AGENT: str
+class ClientInfo:
+    def __init__(self, client_url: URL, client_id: str, user_agents: str | list[str]) -> None:
+        self.CLIENT_URL: URL = client_url
+        self.CLIENT_ID: str = client_id
+        self.USER_AGENT: str
+        if isinstance(user_agents, list):
+            self.USER_AGENT = random.choice(user_agents)
+        else:
+            self.USER_AGENT = user_agents
+
+    def __iter__(self):
+        return iter((self.CLIENT_URL, self.CLIENT_ID, self.USER_AGENT))
 
 
 class ClientType:
     WEB = ClientInfo(
+        BASE_URL,
         "kimne78kx3ncx6brgo4mv6wki5h1ko",
         (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
         ),
     )
-    ANDROID = ClientInfo(
+    MOBILE_WEB = ClientInfo(
+        URL("https://m.twitch.tv"),
+        "r8s4dac0uhzifbpu9sjdiwzctle17ff",
+        [
+            (
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 13; SM-A205U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 13; SM-A102U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 13; SM-G960U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 13; SM-N960U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 13; LM-Q720) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 13; LM-X420) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.5790.166 Mobile Safari/537.36"
+            ),
+        ]
+    )
+    ANDROID_APP = ClientInfo(
+        BASE_URL,
         "kd1unb4b3q4t58fwlpcbzcbnm76a8fp",
         (
             "Dalvik/2.1.0 (Linux; U; Android 7.1.2; SM-G977N Build/LMY48Z) "
@@ -107,6 +165,7 @@ class ClientType:
         ),
     )
     SMARTBOX = ClientInfo(
+        URL("https://android.tv.twitch.tv"),
         "ue6666qo983tsx6so1t0vnawi233wa",
         (
             "Mozilla/5.0 (Linux; Android 7.1; Smart Box C1) AppleWebKit/537.36 "
@@ -217,7 +276,7 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns drops available for a particular channel (unused)
     "ChannelDrops": GQLOperation(
         "DropsHighlightService_AvailableDrops",
-        "e589e213f16d9b17c6f0a8ccd18bdd6a8a6b78bc9db67a75efd43793884ff4e5",
+        "9a62a09bce5b53e26e64a671e530bc599cb6aab1e5ba3cbd5d85966d3940716f",
         variables={
             "channelID": ...,  # channel ID as a str
         },

@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import sys
 import json
-import random
 import asyncio
 import logging
 from time import time
@@ -23,11 +22,17 @@ try:
     from seleniumwire.request import Request
     from selenium.common.exceptions import WebDriverException
     from seleniumwire.undetected_chromedriver import Chrome, ChromeOptions
+except ModuleNotFoundError:
+    # the dependencies weren't installed, but they're not used either, so skip them
+    pass
 except ImportError as exc:
-    raise ImportError(
-        "You need to install Visual C++ Redist (x86 and x64): "
-        "https://support.microsoft.com/en-gb/help/2977003/the-latest-supported-visual-c-downloads"
-    ) from exc
+    if "_brotli" in exc.msg:
+        raise ImportError(
+            "You need to install Visual C++ Redist (x86 and x64): "
+            "https://support.microsoft.com/en-gb/help/2977003/"
+            "the-latest-supported-visual-c-downloads"
+        ) from exc
+    raise
 
 from translate import _
 from channel import Channel
@@ -59,7 +64,7 @@ from constants import (
     GQL_OPERATIONS,
     MAX_CHANNELS,
     WATCH_INTERVAL,
-    DROPS_ENABLED_TAG,
+    # DROPS_ENABLED_TAG,
     State,
     ClientType,
     WebsocketTopic,
@@ -85,7 +90,7 @@ class SkipExtraJsonDecoder(json.JSONDecoder):
         return obj
 
 
-CLIENT_ID, USER_AGENT = ClientType.SMARTBOX
+CLIENT_URL, CLIENT_ID, USER_AGENT = ClientType.MOBILE_WEB
 SAFE_LOADS = lambda s: json.loads(s, cls=SkipExtraJsonDecoder)
 
 
@@ -161,8 +166,6 @@ class _AuthState:
                     options.add_argument("--disable-web-security")
                     options.add_argument("--allow-running-insecure-content")
                     options.add_argument("--lang=en")
-                    options.add_argument("--no-sandbox")
-                    options.add_argument("--test-type")
                     options.add_argument("--disable-gpu")
                     options.set_capability("pageLoadStrategy", "eager")
                     try:
@@ -173,6 +176,7 @@ class _AuthState:
                             None,
                             lambda: Chrome(
                                 options=options,
+                                no_sandbox=True,
                                 suppress_welcome=True,
                                 version_main=version_main,
                                 seleniumwire_options=wire_options,
@@ -276,9 +280,9 @@ class _AuthState:
             "Cache-Control": "no-cache",
             "Client-Id": CLIENT_ID,
             "Host": "id.twitch.tv",
-            "Origin": "https://android.tv.twitch.tv",
+            "Origin": str(CLIENT_URL),
             "Pragma": "no-cache",
-            "Referer": "https://android.tv.twitch.tv/",
+            "Referer": str(CLIENT_URL),
             "User-Agent": USER_AGENT,
             "X-Device-Id": self.device_id,
         }
@@ -494,13 +498,13 @@ class _AuthState:
             headers["User-Agent"] = user_agent
         if hasattr(self, "session_id"):
             headers["Client-Session-Id"] = self.session_id
-        if hasattr(self, "client_version"):
-            headers["Client-Version"] = self.client_version
+        # if hasattr(self, "client_version"):
+            # headers["Client-Version"] = self.client_version
         if hasattr(self, "device_id"):
             headers["X-Device-Id"] = self.device_id
         if gql:
-            headers["Origin"] = "https://www.twitch.tv"
-            headers["Referer"] = "https://www.twitch.tv/"
+            headers["Origin"] = str(BASE_URL)
+            headers["Referer"] = str(BASE_URL)
             headers["Authorization"] = f"OAuth {self.access_token}"
         if integrity:
             headers["Client-Integrity"] = self.integrity_token
@@ -513,20 +517,21 @@ class _AuthState:
     async def _validate(self):
         if not hasattr(self, "session_id"):
             self.session_id = create_nonce(CHARS_HEX_LOWER, 16)
-        if not self._hasattrs("client_version", "device_id", "access_token", "user_id"):
+        if not self._hasattrs("device_id", "access_token", "user_id"):
             session = await self._twitch.get_session()
             jar = cast(aiohttp.CookieJar, session.cookie_jar)
-        if not self._hasattrs("client_version", "device_id"):
+        if not self._hasattrs("device_id"):
             async with self._twitch.request(
-                "GET", BASE_URL, headers=self.headers()
+                "GET", CLIENT_URL, headers=self.headers()
             ) as response:
                 page_html = await response.text("utf8")
-                match = re.search(r'twilightBuildID="([-a-z0-9]+)"', page_html)
-            if match is None:
-                raise MinerException("Unable to extract client_version")
-            self.client_version = match.group(1)
+                assert page_html is not None
+            #     match = re.search(r'twilightBuildID="([-a-z0-9]+)"', page_html)
+            # if match is None:
+            #     raise MinerException("Unable to extract client_version")
+            # self.client_version = match.group(1)
             # doing the request ends up setting the "unique_id" value in the cookie
-            cookie = jar.filter_cookies(BASE_URL)
+            cookie = jar.filter_cookies(CLIENT_URL)
             self.device_id = cookie["unique_id"].value
         if not self._hasattrs("access_token", "user_id"):
             # looks like we're missing something
@@ -534,7 +539,7 @@ class _AuthState:
             logger.info("Checking login")
             login_form.update(_("gui", "login", "logging_in"), None)
             for attempt in range(2):
-                cookie = jar.filter_cookies(BASE_URL)
+                cookie = jar.filter_cookies(CLIENT_URL)
                 if "auth-token" not in cookie:
                     self.access_token = await self._oauth_login()
                     cookie["auth-token"] = self.access_token
@@ -551,8 +556,8 @@ class _AuthState:
                     if status == 401:
                         # the access token we have is invalid - clear the cookie and reauth
                         logger.info("Restored session is invalid")
-                        assert BASE_URL.host is not None
-                        jar.clear_domain(BASE_URL.host)
+                        assert CLIENT_URL.host is not None
+                        jar.clear_domain(CLIENT_URL.host)
                         continue
                     elif status == 200:
                         validate_response = await response.json()
@@ -566,7 +571,7 @@ class _AuthState:
             logger.info(f"Login successful, user ID: {self.user_id}")
             login_form.update(_("gui", "login", "logged_in"), self.user_id)
             # update our cookie and save it
-            jar.update_cookies(cookie, BASE_URL)
+            jar.update_cookies(cookie, CLIENT_URL)
             jar.save(COOKIES_PATH)
         # if not self._hasattrs("integrity_token") or self.integrity_expired:
         #     async with self._twitch.request(
@@ -638,32 +643,33 @@ class Twitch:
             if session.closed:
                 raise RuntimeError("Session is closed")
             return session
-        # try to obtain the latest Chrome user agent from a Github project
-        try:
-            async with aiohttp.request(
-                "GET",
-                "https://jnrbsn.github.io/user-agents/user-agents.json",
-                proxy=self.settings.proxy or None,
-            ) as response:
-                agents = await response.json()
-            if sys.platform == "win32":
-                chrome_agent = random.choice(agents[:3])
-            elif sys.platform == "linux":
-                chrome_agent = random.choice(agents[7:11])
-        except Exception:
-            # looks like we can't rely on 3rd parties too much
-            chrome_agent = ClientType.WEB.USER_AGENT
         # load in cookies
         cookie_jar = aiohttp.CookieJar()
-        if COOKIES_PATH.exists():
-            cookie_jar.load(COOKIES_PATH)
+        try:
+            if COOKIES_PATH.exists():
+                cookie_jar.load(COOKIES_PATH)
+        except Exception:
+            # if loading in the cookies file ends up in an error, just ignore it
+            # clear the jar, just in case
+            cookie_jar.clear()
+        # create timeouts
+        # connection quality mulitiplier determines the magnitude of timeouts
+        connection_quality = self.settings.connection_quality
+        if connection_quality < 1:
+            connection_quality = self.settings.connection_quality = 1
+        elif connection_quality > 6:
+            connection_quality = self.settings.connection_quality = 6
+        timeout = aiohttp.ClientTimeout(
+            sock_connect=5*connection_quality,
+            total=10*connection_quality,
+        )
         # create session, limited to 50 connections at maximum
         connector = aiohttp.TCPConnector(limit=50)
         self._session = aiohttp.ClientSession(
+            timeout=timeout,
             connector=connector,
             cookie_jar=cookie_jar,
-            headers={"User-Agent": chrome_agent},
-            timeout=aiohttp.ClientTimeout(connect=5, total=10),
+            headers={"User-Agent": USER_AGENT},
         )
         return self._session
 
@@ -1161,7 +1167,7 @@ class Twitch:
         # exit early if
         if (
             not channel.online  # stream is offline
-            # or not channel.drops_enabled  # drops aren't enabled
+            or not channel.drops_enabled  # drops aren't enabled
             # there's no game or it's not one of the games we've selected
             or (game := channel.game) is None or game not in self.wanted_games
         ):
@@ -1507,7 +1513,8 @@ class Twitch:
         self, ops: GQLOperation | list[GQLOperation]
     ) -> JsonType | list[JsonType]:
         gql_logger.debug(f"GQL Request: {ops}")
-        while True:
+        backoff = ExponentialBackoff(maximum=60)
+        for delay in backoff:
             try:
                 auth_state = await self.get_auth()
                 async with self.request(
@@ -1532,7 +1539,11 @@ class Twitch:
                     for error_dict in response_json["errors"]:
                         if (
                             "message" in error_dict
-                            and error_dict["message"] in ("service timeout", "service error")
+                            and error_dict["message"] in (
+                                "service error",
+                                "service unavailable",
+                                "service timeout",
+                            )
                         ):
                             force_retry = True
                             break
@@ -1542,7 +1553,8 @@ class Twitch:
                     break
             else:
                 return orig_response
-            await asyncio.sleep(1)
+            await asyncio.sleep(delay)
+        raise MinerException()
 
     def _merge_data(self, primary_data: JsonType, secondary_data: JsonType) -> JsonType:
         merged = {}
@@ -1686,7 +1698,7 @@ class Twitch:
                 "name": game.name,
                 "options": {
                     "includeRestricted": ["SUB_ONLY_LIVE"],
-                    "tags": [DROPS_ENABLED_TAG],
+                    # "tags": [DROPS_ENABLED_TAG],
                 },
             })
         )

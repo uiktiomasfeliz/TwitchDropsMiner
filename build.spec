@@ -3,49 +3,78 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 SELF_PATH = str(Path(".").absolute())
 if SELF_PATH not in sys.path:
     sys.path.insert(0, SELF_PATH)
 
-from constants import WORKING_DIR, DEFAULT_LANG
+from constants import WORKING_DIR, SITE_PACKAGES_PATH, DEFAULT_LANG
 
 if TYPE_CHECKING:
     from PyInstaller.building.api import PYZ, EXE
     from PyInstaller.building.build_main import Analysis
 
-
-datas: list[tuple[str | Path, str]] = [
-    ("pickaxe.ico", '.'),  # icon file
+# (source_path, dest_path, required)
+to_add: list[tuple[Path, str, bool]] = [
+    (Path("pickaxe.ico"), '.', True),  # icon file
     # SeleniumWire HTTPS/SSL cert file and key
-    ("./env/Lib/site-packages/seleniumwire/ca.crt", "./seleniumwire"),
-    ("./env/Lib/site-packages/seleniumwire/ca.key", "./seleniumwire"),
+    (Path(SITE_PACKAGES_PATH, "seleniumwire/ca.crt"), "./seleniumwire", False),
+    (Path(SITE_PACKAGES_PATH, "seleniumwire/ca.key"), "./seleniumwire", False),
 ]
 for lang_filepath in WORKING_DIR.joinpath("lang").glob("*.json"):
     if lang_filepath.stem != DEFAULT_LANG:
-        datas.append((lang_filepath, "lang"))
+        to_add.append((lang_filepath, "lang", True))
+
+# ensure the required to-be-added data exists
+datas: list[tuple[Path, str]] = []
+for source_path, dest_path, required in to_add:
+    if source_path.exists():
+        datas.append((source_path, dest_path))
+    elif required:
+        raise FileNotFoundError(str(source_path))
+
+hooksconfig: dict[str, Any] = {}
+binaries: list[tuple[Path, str]] = []
+hiddenimports: list[str] = [
+    "PIL._tkinter_finder",
+    "setuptools._distutils.log",
+    "setuptools._distutils.dir_util",
+    "setuptools._distutils.file_util",
+    "setuptools._distutils.archive_util",
+]
+
+if sys.platform == "linux":
+    # Needed files for better system tray support on Linux via pystray (AppIndicator backend).
+    datas.append((Path("/usr/lib/girepository-1.0/AppIndicator3-0.1.typelib"), "gi_typelibs"))
+    binaries.append((Path("/lib/x86_64-linux-gnu/libappindicator3.so.1"), "."))
+    hiddenimports.extend([
+        "gi.repository.Gtk",
+        "gi.repository.GObject",
+    ])
+    hooksconfig = {
+        "gi": {
+            "icons": [],
+            "themes": [],
+            "languages": ["en_US"]
+        }
+    }
 
 block_cipher = None
 a = Analysis(
     ["main.py"],
     pathex=[],
     datas=datas,
-    binaries=[],
     excludes=[],
     hookspath=[],
-    hooksconfig={},
     noarchive=False,
-    hiddenimports=[
-        "setuptools._distutils.log",
-        "setuptools._distutils.dir_util",
-        "setuptools._distutils.file_util",
-        "setuptools._distutils.archive_util",
-    ],
     runtime_hooks=[],
+    binaries=binaries,
     cipher=block_cipher,
-    win_no_prefer_redirects=False,
+    hooksconfig=hooksconfig,
+    hiddenimports=hiddenimports,
     win_private_assemblies=False,
+    win_no_prefer_redirects=False,
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
