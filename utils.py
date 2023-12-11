@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 import json
 import random
@@ -15,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 from functools import wraps
 from contextlib import suppress
+from functools import cached_property
 from datetime import datetime, timezone
 from collections import abc, OrderedDict
 from typing import (
@@ -109,7 +111,10 @@ def json_minify(data: JsonType | list[JsonType]) -> str:
 
 
 def timestamp(string: str) -> datetime:
-    return datetime.strptime(string, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    try:
+        return datetime.strptime(string, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return datetime.strptime(string, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 CHARS_ASCII = string.ascii_letters + string.digits
@@ -384,7 +389,9 @@ class AwaitableValue(Generic[_T]):
 class Game:
     def __init__(self, data: JsonType):
         self.id: int = int(data["id"])
-        self.name: str = data["name"]
+        self.name: str = data.get("displayName") or data["name"]
+        if "slug" in data:
+            self.slug = data["slug"]
 
     def __str__(self) -> str:
         return self.name
@@ -399,3 +406,16 @@ class Game:
 
     def __hash__(self) -> int:
         return self.id
+
+    @cached_property
+    def slug(self) -> str:
+        """
+        Converts the game name into a slug, useable for the GQL API.
+        """
+        # remove specific characters
+        slug_text = re.sub(r'\'', '', self.name.lower())
+        # remove non alpha-numeric characters
+        slug_text = re.sub(r'\W+', '-', slug_text)
+        # strip and collapse dashes
+        slug_text = re.sub(r'-{2,}', '-', slug_text.strip('-'))
+        return slug_text
