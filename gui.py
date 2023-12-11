@@ -1149,7 +1149,7 @@ class InventoryOverview(BaseInventoryOverview):
         self._cache: ImageCache = manager._cache
         self._settings: Settings = manager._twitch.settings
         self._filters = {
-            "linked": IntVar(master, 1),
+            "not_linked": IntVar(master, 1),
             "upcoming": IntVar(master, 1),
             "expired": IntVar(master, 0),
             "excluded": IntVar(master, 0),
@@ -1167,11 +1167,11 @@ class InventoryOverview(BaseInventoryOverview):
         ).grid(column=0, row=0)
         icolumn = 0
         ttk.Checkbutton(
-            filter_frame, variable=self._filters["linked"]
+            filter_frame, variable=self._filters["not_linked"]
         ).grid(column=(icolumn := icolumn + 1), row=0)
         ttk.Label(
             filter_frame,
-            text=_("gui", "inventory", "filter", "linked"),
+            text=_("gui", "inventory", "filter", "not_linked"),
             padding=(0, 0, LABEL_SPACING, 0),
         ).grid(column=(icolumn := icolumn + 1), row=0)
         ttk.Checkbutton(
@@ -1232,14 +1232,14 @@ class InventoryOverview(BaseInventoryOverview):
     def _update_visibility(self, campaign: DropsCampaign):
         # True if the campaign is supposed to show, False makes it hidden.
         frame = self._campaigns[campaign]["frame"]
-        linked = bool(self._filters["linked"].get())
+        not_linked = bool(self._filters["not_linked"].get())
         expired = bool(self._filters["expired"].get())
         excluded = bool(self._filters["excluded"].get())
         upcoming = bool(self._filters["upcoming"].get())
         finished = bool(self._filters["finished"].get())
         priority_only = self._settings.priority_only
         if (
-            (not linked or campaign.linked)
+            (not_linked or campaign.linked)
             and (campaign.active or upcoming and campaign.upcoming or expired and campaign.expired)
             and (
                 excluded or (

@@ -64,7 +64,6 @@ from constants import (
     GQL_OPERATIONS,
     MAX_CHANNELS,
     WATCH_INTERVAL,
-    # DROPS_ENABLED_TAG,
     State,
     ClientType,
     WebsocketTopic,
@@ -794,6 +793,9 @@ class Twitch:
         self.websocket.add_topics([
             WebsocketTopic("User", "Drops", auth_state.user_id, self.process_drops),
             WebsocketTopic("User", "CommunityPoints", auth_state.user_id, self.process_points),
+            WebsocketTopic(
+                "User", "Notifications", auth_state.user_id, self.process_notifications
+            ),
         ])
         full_cleanup: bool = False
         channels: Final[OrderedDict[int, Channel]] = self.channels
@@ -1396,6 +1398,18 @@ class Twitch:
         self._drop_update = None
 
     @task_wrapper
+    async def process_notifications(self, user_id: int, message: JsonType):
+        if message["type"] == "create-notification":
+            data: JsonType = message["data"]["notification"]
+            if data["type"] == "user_drop_reward_reminder_notification":
+                self.change_state(State.INVENTORY_FETCH)
+                await self.gql_request(
+                    GQL_OPERATIONS["NotificationsDelete"].with_variables(
+                        {"input": {"id": data["id"]}}
+                    )
+                )
+
+    @task_wrapper
     async def process_points(self, user_id: int, message: JsonType):
         # Example payloads:
         # {
@@ -1540,9 +1554,10 @@ class Twitch:
                         if (
                             "message" in error_dict
                             and error_dict["message"] in (
-                                "service error",
+                                # "service error",
                                 "service unavailable",
                                 "service timeout",
+                                "context deadline exceeded",
                             )
                         ):
                             force_retry = True
@@ -1560,8 +1575,7 @@ class Twitch:
         merged = {}
         for key in set(chain(primary_data.keys(), secondary_data.keys())):
             in_primary = key in primary_data
-            in_secondary = key in secondary_data
-            if in_primary and in_secondary:
+            if in_primary and key in secondary_data:
                 vp = primary_data[key]
                 vs = secondary_data[key]
                 if not isinstance(vp, type(vs)) or not isinstance(vs, type(vp)):
@@ -1695,17 +1709,19 @@ class Twitch:
         response = await self.gql_request(
             GQL_OPERATIONS["GameDirectory"].with_variables({
                 "limit": limit,
-                "name": game.name,
+                "slug": game.slug,
                 "options": {
                     "includeRestricted": ["SUB_ONLY_LIVE"],
-                    # "tags": [DROPS_ENABLED_TAG],
+                    "systemFilters": ["DROPS_ENABLED"],
                 },
             })
         )
-        return [
-            Channel.from_directory(self, stream_channel_data["node"])
-            for stream_channel_data in response["data"]["game"]["streams"]["edges"]
-        ]
+        if "game" in response["data"]:
+            return [
+                Channel.from_directory(self, stream_channel_data["node"], drops_enabled=True)
+                for stream_channel_data in response["data"]["game"]["streams"]["edges"]
+            ]
+        return []
 
     async def claim_points(self, channel_id: str | int, claim_id: str) -> None:
         await self.gql_request(

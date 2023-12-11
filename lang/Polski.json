@@ -1,4 +1,5 @@
 {
+    "english_name": "Polish",
     "status": {
         "terminated": "\nAplikacja została zatrzymana.\nZamknij okno, aby wyjść z aplikacji.",
         "watching": "Oglądam kanał: {channel}",
@@ -57,13 +58,13 @@
             "quit": "Wyjdź"
         },
         "login": {
-            "name": "Zalogowany",
-            "labels": "Status:\nID:",
-            "logged_in": "Zalogowany",
-            "logged_out": "Wylogowany",
+            "name": "Logowanie",
+            "labels": "Status:\nIdentyfikator:",
+            "logged_in": "Zalogowano",
+            "logged_out": "Wylogowano",
             "logging_in": "Logowanie...",
             "required": "Wymagane zalogowanie",
-            "request": "Zaloguj się, aby kontynuować.",
+            "request": "Zaloguj się, by kontynuować.",
             "username": "Nazwa użytkownika",
             "password": "Hasło",
             "twofa_code": "Kod 2FA (opcjonalnie)",
@@ -107,7 +108,7 @@
             "filter": {
                 "name": "Filtr",
                 "show": "Pokaż:",
-                "linked": "Tylko połączone",
+                "not_linked": "Niepołączone",
                 "upcoming": "Nadchodzące",
                 "expired": "Wygasłe",
                 "excluded": "Wykluczone",
@@ -116,7 +117,7 @@
             },
             "status": {
                 "linked": "Połączono ✔",
-                "not_linked": "Niepołączono ❌",
+                "not_linked": "Nie połączono ❌",
                 "active": "Aktywna ✔",
                 "upcoming": "Nadchodząca ⏳",
                 "expired": "Wygasła ❌",
