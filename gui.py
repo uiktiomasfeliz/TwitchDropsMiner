@@ -521,7 +521,7 @@ class LoginForm(BaseLoginForm):
     async def ask_login(self) -> LoginData:
         self.update(_("gui", "login", "required"), None)
         # ensure the window isn't hidden into tray when this runs
-        self._manager.grab_attention(sound=False)
+        # self._manager.grab_attention(sound=False)
         while True:
             self._manager.print(_("gui", "login", "request"))
             await self.wait_for_login_press()
@@ -548,7 +548,7 @@ class LoginForm(BaseLoginForm):
     async def ask_enter_code(self, user_code: str) -> None:
         self.update(_("gui", "login", "required"), None)
         # ensure the window isn't hidden into tray when this runs
-        self._manager.grab_attention(sound=False)
+        # self._manager.grab_attention(sound=False)
         self._manager.print(_("gui", "login", "request"))
         await self.wait_for_login_press()
         self._manager.print(f"Enter this code on the Twitch's device activation page: {user_code}")
